@@ -142,6 +142,7 @@ xilinx.com:ip:axi_dma:7.1\
 xilinx.com:ip:axis_data_fifo:2.0\
 xilinx.com:ip:util_vector_logic:2.0\
 xilinx.com:ip:xlconstant:1.1\
+xilinx.com:ip:xfft:9.1\
 "
 
    set list_ips_missing ""
@@ -196,6 +197,108 @@ if { $bCheckIPsPassed != 1 } {
 # DESIGN PROCs
 ##################################################################
 
+
+# Hierarchical cell: fft_data_accelerator
+proc create_hier_cell_fft_data_accelerator { parentCell nameHier } {
+
+  variable script_folder
+
+  if { $parentCell eq "" || $nameHier eq "" } {
+     catch {common::send_gid_msg -ssname BD::TCL -id 2092 -severity "ERROR" "create_hier_cell_fft_data_accelerator() - Empty argument(s)!"}
+     return
+  }
+
+  # Get object for parentCell
+  set parentObj [get_bd_cells $parentCell]
+  if { $parentObj == "" } {
+     catch {common::send_gid_msg -ssname BD::TCL -id 2090 -severity "ERROR" "Unable to find parent cell <$parentCell>!"}
+     return
+  }
+
+  # Make sure parentObj is hier blk
+  set parentType [get_property TYPE $parentObj]
+  if { $parentType ne "hier" } {
+     catch {common::send_gid_msg -ssname BD::TCL -id 2091 -severity "ERROR" "Parent <$parentObj> has TYPE = <$parentType>. Expected to be <hier>."}
+     return
+  }
+
+  # Save current instance; Restore later
+  set oldCurInst [current_bd_instance .]
+
+  # Set parent object as current
+  current_bd_instance $parentObj
+
+  # Create cell and set as current instance
+  set hier_obj [create_bd_cell -type hier $nameHier]
+  current_bd_instance $hier_obj
+
+  # Create interface pins
+  create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 M_AXI_MM2S
+
+  create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 M_AXI_MM2S1
+
+  create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 M_AXI_S2MM
+
+  create_bd_intf_pin -mode Slave -vlnv xilinx.com:interface:aximm_rtl:1.0 S_AXI_LITE
+
+  create_bd_intf_pin -mode Slave -vlnv xilinx.com:interface:aximm_rtl:1.0 S_AXI_LITE1
+
+
+  # Create pins
+  create_bd_pin -dir I -type rst axi_resetn
+  create_bd_pin -dir I -type clk m_axi_mm2s_aclk
+
+  # Create instance: axi_dma_data_fft, and set properties
+  set axi_dma_data_fft [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:7.1 axi_dma_data_fft ]
+  set_property -dict [ list \
+   CONFIG.c_include_sg {0} \
+   CONFIG.c_mm2s_burst_size {256} \
+   CONFIG.c_s2mm_burst_size {256} \
+   CONFIG.c_sg_include_stscntrl_strm {0} \
+   CONFIG.c_sg_length_width {26} \
+ ] $axi_dma_data_fft
+
+  # Create instance: axi_dma_fft_config, and set properties
+  set axi_dma_fft_config [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:7.1 axi_dma_fft_config ]
+  set_property -dict [ list \
+   CONFIG.c_include_s2mm {0} \
+   CONFIG.c_include_sg {0} \
+   CONFIG.c_m_axis_mm2s_tdata_width {16} \
+   CONFIG.c_mm2s_burst_size {16} \
+   CONFIG.c_s2mm_burst_size {16} \
+   CONFIG.c_sg_include_stscntrl_strm {0} \
+   CONFIG.c_sg_length_width {26} \
+ ] $axi_dma_fft_config
+
+  # Create instance: xfft_data, and set properties
+  set xfft_data [ create_bd_cell -type ip -vlnv xilinx.com:ip:xfft:9.1 xfft_data ]
+  set_property -dict [ list \
+   CONFIG.implementation_options {automatically_select} \
+   CONFIG.number_of_stages_using_block_ram_for_data_and_phase_factors {7} \
+   CONFIG.output_ordering {natural_order} \
+   CONFIG.rounding_modes {convergent_rounding} \
+   CONFIG.target_clock_frequency {100} \
+   CONFIG.target_data_throughput {100} \
+   CONFIG.transform_length {16384} \
+ ] $xfft_data
+
+  # Create interface connections
+  connect_bd_intf_net -intf_net axi_dma_data_fft_M_AXIS_MM2S [get_bd_intf_pins axi_dma_data_fft/M_AXIS_MM2S] [get_bd_intf_pins xfft_data/S_AXIS_DATA]
+  connect_bd_intf_net -intf_net axi_dma_data_fft_M_AXI_MM2S [get_bd_intf_pins M_AXI_MM2S1] [get_bd_intf_pins axi_dma_data_fft/M_AXI_MM2S]
+  connect_bd_intf_net -intf_net axi_dma_data_fft_M_AXI_S2MM [get_bd_intf_pins M_AXI_S2MM] [get_bd_intf_pins axi_dma_data_fft/M_AXI_S2MM]
+  connect_bd_intf_net -intf_net axi_dma_fft_config_M_AXIS_MM2S [get_bd_intf_pins axi_dma_fft_config/M_AXIS_MM2S] [get_bd_intf_pins xfft_data/S_AXIS_CONFIG]
+  connect_bd_intf_net -intf_net axi_dma_fft_config_M_AXI_MM2S [get_bd_intf_pins M_AXI_MM2S] [get_bd_intf_pins axi_dma_fft_config/M_AXI_MM2S]
+  connect_bd_intf_net -intf_net axi_smc_1_M04_AXI [get_bd_intf_pins S_AXI_LITE1] [get_bd_intf_pins axi_dma_data_fft/S_AXI_LITE]
+  connect_bd_intf_net -intf_net axi_smc_1_M05_AXI [get_bd_intf_pins S_AXI_LITE] [get_bd_intf_pins axi_dma_fft_config/S_AXI_LITE]
+  connect_bd_intf_net -intf_net xfft_data_M_AXIS_DATA [get_bd_intf_pins axi_dma_data_fft/S_AXIS_S2MM] [get_bd_intf_pins xfft_data/M_AXIS_DATA]
+
+  # Create port connections
+  connect_bd_net -net processing_system7_0_FCLK_CLK0 [get_bd_pins m_axi_mm2s_aclk] [get_bd_pins axi_dma_data_fft/m_axi_mm2s_aclk] [get_bd_pins axi_dma_data_fft/m_axi_s2mm_aclk] [get_bd_pins axi_dma_data_fft/s_axi_lite_aclk] [get_bd_pins axi_dma_fft_config/m_axi_mm2s_aclk] [get_bd_pins axi_dma_fft_config/s_axi_lite_aclk] [get_bd_pins xfft_data/aclk]
+  connect_bd_net -net rst_ps7_0_100M_peripheral_aresetn [get_bd_pins axi_resetn] [get_bd_pins axi_dma_data_fft/axi_resetn] [get_bd_pins axi_dma_fft_config/axi_resetn]
+
+  # Restore current instance
+  current_bd_instance $oldCurInst
+}
 
 # Hierarchical cell: GPS_Receiver_IQ_Streamer
 proc create_hier_cell_GPS_Receiver_IQ_Streamer { parentCell nameHier } {
@@ -292,6 +395,7 @@ proc create_hier_cell_GPS_Receiver_IQ_Streamer { parentCell nameHier } {
    CONFIG.FIFO_MODE {2} \
    CONFIG.HAS_PROG_FULL {0} \
    CONFIG.HAS_RD_DATA_COUNT {1} \
+   CONFIG.HAS_TLAST {1} \
    CONFIG.HAS_WR_DATA_COUNT {1} \
    CONFIG.IS_ACLK_ASYNC {1} \
    CONFIG.SYNCHRONIZATION_STAGES {2} \
@@ -464,6 +568,8 @@ proc create_root_design { parentCell } {
   # Create instance: axi_gpio_0, and set properties
   set axi_gpio_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_gpio:2.0 axi_gpio_0 ]
   set_property -dict [ list \
+   CONFIG.C_ALL_OUTPUTS {1} \
+   CONFIG.C_GPIO_WIDTH {6} \
    CONFIG.GPIO_BOARD_INTERFACE {leds_6bits} \
    CONFIG.USE_BOARD_FLOW {true} \
  ] $axi_gpio_0
@@ -475,7 +581,7 @@ proc create_root_design { parentCell } {
   set axi_smc [ create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 axi_smc ]
   set_property -dict [ list \
    CONFIG.NUM_CLKS {1} \
-   CONFIG.NUM_SI {1} \
+   CONFIG.NUM_SI {5} \
  ] $axi_smc
 
   # Create instance: axi_smc_1, and set properties
@@ -484,6 +590,9 @@ proc create_root_design { parentCell } {
    CONFIG.NUM_MI {6} \
    CONFIG.NUM_SI {1} \
  ] $axi_smc_1
+
+  # Create instance: fft_data_accelerator
+  create_hier_cell_fft_data_accelerator [current_bd_instance .] fft_data_accelerator
 
   # Create instance: processing_system7_0, and set properties
   set processing_system7_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:5.5 processing_system7_0 ]
@@ -1331,11 +1440,16 @@ proc create_root_design { parentCell } {
 
   # Create interface connections
   connect_bd_intf_net -intf_net GPS_Receiver_IQ_Streamer_M_AXI_S2MM [get_bd_intf_pins GPS_Receiver_IQ_Streamer/M_AXI_S2MM] [get_bd_intf_pins axi_smc/S00_AXI]
+  connect_bd_intf_net -intf_net axi_dma_data_fft_M_AXI_MM2S [get_bd_intf_pins axi_smc/S01_AXI] [get_bd_intf_pins fft_data_accelerator/M_AXI_MM2S1]
+  connect_bd_intf_net -intf_net axi_dma_data_fft_M_AXI_S2MM [get_bd_intf_pins axi_smc/S02_AXI] [get_bd_intf_pins fft_data_accelerator/M_AXI_S2MM]
+  connect_bd_intf_net -intf_net axi_dma_fft_config_M_AXI_MM2S [get_bd_intf_pins axi_smc/S03_AXI] [get_bd_intf_pins fft_data_accelerator/M_AXI_MM2S]
   connect_bd_intf_net -intf_net axi_gpio_0_GPIO [get_bd_intf_ports leds_6bits] [get_bd_intf_pins axi_gpio_0/GPIO]
   connect_bd_intf_net -intf_net axi_smc_1_M00_AXI [get_bd_intf_pins GPS_Receiver_IQ_Streamer/S_AXI] [get_bd_intf_pins axi_smc_1/M00_AXI]
   connect_bd_intf_net -intf_net axi_smc_1_M01_AXI [get_bd_intf_pins GPS_Receiver_IQ_Streamer/S_AXI_LITE] [get_bd_intf_pins axi_smc_1/M01_AXI]
   connect_bd_intf_net -intf_net axi_smc_1_M02_AXI [get_bd_intf_pins axi_gpio_0/S_AXI] [get_bd_intf_pins axi_smc_1/M02_AXI]
   connect_bd_intf_net -intf_net axi_smc_1_M03_AXI [get_bd_intf_pins axi_intc_0/s_axi] [get_bd_intf_pins axi_smc_1/M03_AXI]
+  connect_bd_intf_net -intf_net axi_smc_1_M04_AXI [get_bd_intf_pins axi_smc_1/M04_AXI] [get_bd_intf_pins fft_data_accelerator/S_AXI_LITE1]
+  connect_bd_intf_net -intf_net axi_smc_1_M05_AXI [get_bd_intf_pins axi_smc_1/M05_AXI] [get_bd_intf_pins fft_data_accelerator/S_AXI_LITE]
   connect_bd_intf_net -intf_net axi_smc_M00_AXI [get_bd_intf_pins axi_smc/M00_AXI] [get_bd_intf_pins processing_system7_0/S_AXI_HP0]
   connect_bd_intf_net -intf_net processing_system7_0_DDR [get_bd_intf_ports DDR] [get_bd_intf_pins processing_system7_0/DDR]
   connect_bd_intf_net -intf_net processing_system7_0_FIXED_IO [get_bd_intf_ports FIXED_IO] [get_bd_intf_pins processing_system7_0/FIXED_IO]
@@ -1355,7 +1469,7 @@ proc create_root_design { parentCell } {
   connect_bd_net -net max2769_interface_0_G_IDLE [get_bd_ports G_IDLE] [get_bd_pins GPS_Receiver_IQ_Streamer/G_IDLE]
   connect_bd_net -net max2769_interface_0_G_PGM [get_bd_ports G_PGM] [get_bd_pins GPS_Receiver_IQ_Streamer/G_PGM]
   connect_bd_net -net max2769_interface_0_G_SHDN [get_bd_ports G_SHDN] [get_bd_pins GPS_Receiver_IQ_Streamer/G_SHDN]
-  connect_bd_net -net processing_system7_0_FCLK_CLK0 [get_bd_pins GPS_Receiver_IQ_Streamer/s_axi_aclk] [get_bd_pins axi_gpio_0/s_axi_aclk] [get_bd_pins axi_intc_0/s_axi_aclk] [get_bd_pins axi_smc/aclk] [get_bd_pins axi_smc_1/aclk] [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK] [get_bd_pins processing_system7_0/S_AXI_HP0_ACLK] [get_bd_pins rst_ps7_0_100M/slowest_sync_clk]
+  connect_bd_net -net processing_system7_0_FCLK_CLK0 [get_bd_pins GPS_Receiver_IQ_Streamer/s_axi_aclk] [get_bd_pins axi_gpio_0/s_axi_aclk] [get_bd_pins axi_intc_0/s_axi_aclk] [get_bd_pins axi_smc/aclk] [get_bd_pins axi_smc_1/aclk] [get_bd_pins fft_data_accelerator/m_axi_mm2s_aclk] [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK] [get_bd_pins processing_system7_0/S_AXI_HP0_ACLK] [get_bd_pins rst_ps7_0_100M/slowest_sync_clk]
   connect_bd_net -net processing_system7_0_FCLK_RESET0_N [get_bd_pins processing_system7_0/FCLK_RESET0_N] [get_bd_pins rst_ps7_0_100M/ext_reset_in]
   connect_bd_net -net processing_system7_0_SPI0_MOSI_O [get_bd_ports SPI0_MOSI_O_0] [get_bd_pins processing_system7_0/SPI0_MOSI_O]
   connect_bd_net -net processing_system7_0_SPI0_SCLK_O [get_bd_ports SPI0_SCLK_O_0] [get_bd_pins processing_system7_0/SPI0_SCLK_O]
@@ -1363,14 +1477,19 @@ proc create_root_design { parentCell } {
   connect_bd_net -net processing_system7_0_SPI1_MOSI_O [get_bd_ports SPI1_MOSI_O_GPS] [get_bd_pins processing_system7_0/SPI1_MOSI_O]
   connect_bd_net -net processing_system7_0_SPI1_SCLK_O [get_bd_ports SPI1_SCLK_O_GPS] [get_bd_pins processing_system7_0/SPI1_SCLK_O]
   connect_bd_net -net processing_system7_0_SPI1_SS_O [get_bd_ports SPI1_SS_O_GPS] [get_bd_pins processing_system7_0/SPI1_SS_O]
-  connect_bd_net -net rst_ps7_0_100M_peripheral_aresetn [get_bd_pins GPS_Receiver_IQ_Streamer/s_axi_aresetn] [get_bd_pins axi_gpio_0/s_axi_aresetn] [get_bd_pins axi_intc_0/s_axi_aresetn] [get_bd_pins axi_smc/aresetn] [get_bd_pins axi_smc_1/aresetn] [get_bd_pins rst_ps7_0_100M/peripheral_aresetn]
+  connect_bd_net -net rst_ps7_0_100M_peripheral_aresetn [get_bd_pins GPS_Receiver_IQ_Streamer/s_axi_aresetn] [get_bd_pins axi_gpio_0/s_axi_aresetn] [get_bd_pins axi_intc_0/s_axi_aresetn] [get_bd_pins axi_smc/aresetn] [get_bd_pins axi_smc_1/aresetn] [get_bd_pins fft_data_accelerator/axi_resetn] [get_bd_pins rst_ps7_0_100M/peripheral_aresetn]
 
   # Create address segments
   assign_bd_address -offset 0x40400000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs GPS_Receiver_IQ_Streamer/axi_dma_0/S_AXI_LITE/Reg] -force
+  assign_bd_address -offset 0x40410000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs fft_data_accelerator/axi_dma_data_fft/S_AXI_LITE/Reg] -force
+  assign_bd_address -offset 0x40420000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs fft_data_accelerator/axi_dma_fft_config/S_AXI_LITE/Reg] -force
   assign_bd_address -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_gpio_0/S_AXI/Reg] -force
   assign_bd_address -offset 0x41800000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_intc_0/S_AXI/Reg] -force
   assign_bd_address -offset 0x41210000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs GPS_Receiver_IQ_Streamer/gps_ip_settings/S_AXI/Reg] -force
   assign_bd_address -offset 0x00000000 -range 0x20000000 -target_address_space [get_bd_addr_spaces GPS_Receiver_IQ_Streamer/axi_dma_0/Data_S2MM] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
+  assign_bd_address -offset 0x00000000 -range 0x20000000 -target_address_space [get_bd_addr_spaces fft_data_accelerator/axi_dma_data_fft/Data_MM2S] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
+  assign_bd_address -offset 0x00000000 -range 0x20000000 -target_address_space [get_bd_addr_spaces fft_data_accelerator/axi_dma_data_fft/Data_S2MM] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
+  assign_bd_address -offset 0x00000000 -range 0x20000000 -target_address_space [get_bd_addr_spaces fft_data_accelerator/axi_dma_fft_config/Data_MM2S] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
 
 
   # Restore current instance
