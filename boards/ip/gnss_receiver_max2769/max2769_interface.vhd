@@ -1,4 +1,4 @@
---  Copyright (c) 2020, embedINN
+--  Copyright (c) 2022, embedINN
 --  All rights reserved.
 
 --  Redistribution and use in source and binary forms, with or without
@@ -42,6 +42,11 @@ entity max2769_interface is
            IQ_data_msb   : out std_logic_vector(31 downto 0);
            IQ_valid      : out std_logic := '0';
            
+           -- directly out the iq to fed into fft core 
+           IQ_to_fft            : out signed(31 downto 0); -- interleaved Q_8bit,I_8bit
+           IQ_to_fft_valid      : out std_logic := '0';
+
+           
            G_I0          : in  std_logic;
            G_I1          : in  std_logic;
            G_Q0          : in  std_logic;
@@ -66,6 +71,8 @@ signal IQ_nibble_msb    : std_logic_vector(3  downto 0);
 signal IQ_word_msb      : std_logic_vector(31 downto 0);
 signal IQ_word_lsb      : std_logic_vector(31 downto 0);
 signal IQ_word_reg      : std_logic_vector(31 downto 0);
+signal I_sample_16bit    : signed(15 downto 0);
+signal Q_sample_16bit    : signed(15 downto 0);
 signal IQ_valid_s       : std_logic;
 
 signal nibble_counter   : std_logic_vector(2  downto 0) := "000";
@@ -85,7 +92,6 @@ begin
             --IQ_nibble <=  '0' & nibble_counter;
             IQ_word_lsb   <=  IQ_nibble_lsb & IQ_word_lsb(31 downto 4);
             IQ_word_msb   <=  IQ_nibble_msb & IQ_word_lsb(31 downto 4);
-            --IQ_word_msb   <=  IQ_word_msb(27 downto 0) & IQ_nibble;
 
             nibble_counter <= nibble_counter + 1; 
             
@@ -98,12 +104,82 @@ begin
         if(rising_edge(clk_16_386)) then
             if nibble_counter = "001" and enable = '1' then
                 IQ_valid        <= '1';
-                IQ_data_lsb         <= IQ_word_lsb;
-                IQ_data_msb         <= IQ_word_msb;
+                IQ_data_lsb     <= IQ_word_lsb;
+                IQ_data_msb     <= IQ_word_msb;
             else
                 IQ_valid        <= '0';
             end if;    
         end if;
     end process;
+
+    --    Maxchip datasheet 2'scomplement 2-bit format output
+    --    this output will be fed into the FFT
+    --    --------------------------------
+    --    SIGN/MAGNITUDE
+    --    -------------------------------- 
+    --     I1I0    output   Q1Q0    output             
+    --    --------------------------------
+    --      01      +3       01     +3    
+    --      00      +1       00     +1
+    --      10      -1       10     -1
+    --      11      -3       11     -3
+    --   ----------------------------------    
+    
+      I_ouput : process (G_I0, G_I1)
+        variable I : std_logic_vector(1 downto 0);
+      begin
+        I := G_I1 & G_I0;
+         
+        case I is
+          when "00"=>
+            I_sample_16bit <= to_signed(1,16);
+          when "01" =>
+            I_sample_16bit <= to_signed(3,16);
+          when "10" =>
+            I_sample_16bit <= to_signed(-1,16);
+          when "11" =>
+            I_sample_16bit <= to_signed(-3,16);
+    
+          when others =>
+            I_sample_16bit <= to_signed(0,16);
+        end case;
+         
+      end process;
+    
+    
+      Q_ouput : process (G_Q0, G_Q1)
+        variable Q : std_logic_vector(1 downto 0);
+      begin
+        Q := G_Q1 & G_Q0;
+         
+        case Q is
+          when "00"=>
+            Q_sample_16bit <= to_signed(1,16);
+          when "01" =>
+            Q_sample_16bit <= to_signed(3,16);
+          when "10" =>
+            Q_sample_16bit <= to_signed(-1,16);
+          when "11" =>
+            Q_sample_16bit <= to_signed(-3,16);
+    
+          when others =>
+            Q_sample_16bit <= to_signed(0,16);
+        end case;
+         
+      end process;
+    -- synchronous ouput to fft fifo    
+    IQ_data_fft: process(clk_16_386)                          
+    begin                                                     
+                                                              
+        if(rising_edge(clk_16_386)) then                      
+            if enable = '1' then   
+                IQ_to_fft_valid   <= '1';                       
+                IQ_to_fft         <= Q_sample_16bit & I_sample_16bit;           
+            else                                              
+                IQ_to_fft_valid   <= '0';                       
+            end if;                                           
+        end if;                                               
+    end process;                                              
+    
 
 end Behavioral;
