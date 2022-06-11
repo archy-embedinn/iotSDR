@@ -40,16 +40,21 @@ def getCode(num, zero = False, samplesPerChip = 1, prn = 0):
         #Shift g2
         g2[9] = sum([g2[i] for i in g2tap]) % 2 
         g2.rotate()
-
+    
+    
     if(zero == False):
         #format GC to have -1 in place of 0
         for n,i in enumerate(g):
             if i==0:
                 g[n]=-1
-    
+
+    #zero padding for FFT log2N
+    #g.append(0)
+            
     if (samplesPerChip > 1 ):
         # Repeat each chip to match our ADC sample frequency
         gsamp = np.repeat(g, samplesPerChip)
+        
         return gsamp
     return g
 
