@@ -1,1 +1,5 @@
 iotSDR_GPS_pynq/
+.ipynb_checkpoints/
+__pycache__/
+webtalk.*
+sds_trace_data.dat

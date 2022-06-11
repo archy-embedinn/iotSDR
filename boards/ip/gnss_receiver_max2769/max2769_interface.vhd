@@ -43,7 +43,7 @@ entity max2769_interface is
            IQ_valid      : out std_logic := '0';
            
            -- directly out the iq to fed into fft core 
-           IQ_to_fft            : out signed(31 downto 0); -- interleaved Q_8bit,I_8bit
+           IQ_to_fft            : out std_logic_vector(31 downto 0); -- interleaved Q_8bit,I_8bit
            IQ_to_fft_valid      : out std_logic := '0';
 
            
@@ -71,8 +71,8 @@ signal IQ_nibble_msb    : std_logic_vector(3  downto 0);
 signal IQ_word_msb      : std_logic_vector(31 downto 0);
 signal IQ_word_lsb      : std_logic_vector(31 downto 0);
 signal IQ_word_reg      : std_logic_vector(31 downto 0);
-signal I_sample_16bit    : signed(15 downto 0);
-signal Q_sample_16bit    : signed(15 downto 0);
+signal I_sample_16bit    : std_logic_vector(15 downto 0);
+signal Q_sample_16bit    : std_logic_vector(15 downto 0);
 signal IQ_valid_s       : std_logic;
 
 signal nibble_counter   : std_logic_vector(2  downto 0) := "000";
@@ -132,16 +132,16 @@ begin
          
         case I is
           when "00"=>
-            I_sample_16bit <= to_signed(1,16);
+            I_sample_16bit <= x"7FFF";--to_signed(1,16);
           when "01" =>
-            I_sample_16bit <= to_signed(3,16);
+            I_sample_16bit <= x"7FFD";--to_signed(3,16);
           when "10" =>
-            I_sample_16bit <= to_signed(-1,16);
+            I_sample_16bit <= x"8001";--to_signed(-1,16);
           when "11" =>
-            I_sample_16bit <= to_signed(-3,16);
+            I_sample_16bit <= x"8003";--to_signed(-3,16);
     
           when others =>
-            I_sample_16bit <= to_signed(0,16);
+            I_sample_16bit <= x"0000";--;to_signed(0,16);
         end case;
          
       end process;
@@ -154,16 +154,16 @@ begin
          
         case Q is
           when "00"=>
-            Q_sample_16bit <= to_signed(1,16);
+            Q_sample_16bit <= x"7FFF";--to_signed(1,16);
           when "01" =>
-            Q_sample_16bit <= to_signed(3,16);
+            Q_sample_16bit <= x"7FFD";--to_signed(3,16);
           when "10" =>
-            Q_sample_16bit <= to_signed(-1,16);
+            Q_sample_16bit <= x"8001";--to_signed(-1,16);
           when "11" =>
-            Q_sample_16bit <= to_signed(-3,16);
+            Q_sample_16bit <= x"8003";--to_signed(-3,16);
     
           when others =>
-            Q_sample_16bit <= to_signed(0,16);
+            Q_sample_16bit <= x"0000";
         end case;
          
       end process;

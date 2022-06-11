@@ -34,3 +34,8 @@ supported Version: Vivado 2019.1
     $ make
       or
     $ vivado -mode batch -nojournal -nolog -source write_project.tcl
+
+### Testing the bitfile iteratively
+    to test the genrated bitfile, the bitfile should be transfer to the nottbook folder present
+    in the iotSDR board
+    use FileZilla if working on windows host matchine
