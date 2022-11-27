@@ -1,6 +1,6 @@
 # ZYNQ firmware development 
 
-supported Version: Vivado 2019.1
+supported Version: Vivado 2020.2
 
 ## Generate Vivado Project
     $ git clone  https://github.com/archy-embedinn/iotSDR_Platform.git
